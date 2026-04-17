@@ -1,13 +1,16 @@
 import { Activity, AlertTriangle, CheckCircle2, Clock, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ChartFrame } from "@/components/chart-frame";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
+import { buildResponseTimeSeries, CHART_COLORS, type ResponseSeriesRow } from "@/lib/chart";
 import { formatDate, formatDuration } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -16,6 +19,10 @@ export function DashboardPage() {
   const charts = useQuery({ queryKey: queryKeys.charts, queryFn: () => api.charts() });
   const events = useQuery({ queryKey: queryKeys.recentEvents, queryFn: api.recentEvents });
   const streaks = useQuery({ queryKey: queryKeys.failureStreaks, queryFn: api.failureStreaks });
+  const responseTimeTrend = useMemo(
+    () => buildResponseTimeSeries(charts.data?.data.responseTimes ?? [], "active", "runIndex"),
+    [charts.data?.data.responseTimes],
+  );
 
   if (stats.isLoading || charts.isLoading || events.isLoading || streaks.isLoading) {
     return <div className="space-y-4"><Skeleton className="h-28" /><Skeleton className="h-80" /></div>;
@@ -40,24 +47,57 @@ export function DashboardPage() {
 
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
         <Card>
-          <CardHeader><CardTitle>Response time trend</CardTitle></CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={charts.data?.data.responseTimes ?? []}>
+          <CardHeader>
+            <CardTitle>Response time trend</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Active cronjobs aligned by run number. Display is capped at {formatDuration(responseTimeTrend.capMs)}.
+            </p>
+          </CardHeader>
+          <CardContent className="h-80 min-w-0">
+            <ChartFrame>
+              {({ width, height }) => (
+              <LineChart width={width} height={height} data={responseTimeTrend.data}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
-                <YAxis />
-                <Tooltip />
-                <Area type="monotone" dataKey="durationMs" stroke="var(--chart-2)" fill="var(--chart-2)" fillOpacity={0.2} />
-              </AreaChart>
-            </ResponsiveContainer>
+                <YAxis tickFormatter={(value) => formatDuration(Number(value))} />
+                <Legend />
+                <Tooltip
+                  formatter={(_value, _name, item) => {
+                    const payload = item.payload as ResponseSeriesRow;
+                    const dataKey = String(item.dataKey);
+                    const series = responseTimeTrend.series.find((itemSeries) => itemSeries.key === dataKey);
+                    const original = series ? payload.originalDurations[series.key] : undefined;
+                    return [
+                      original && original > responseTimeTrend.capMs
+                        ? `${formatDuration(original)} actual, shown at ${formatDuration(responseTimeTrend.capMs)}`
+                        : formatDuration(Number(_value)),
+                      series?.name ?? String(_name),
+                    ];
+                  }}
+                />
+                {responseTimeTrend.series.map((series, index) => (
+                  <Line
+                    key={series.key}
+                    type="monotone"
+                    dataKey={series.key}
+                    name={series.name}
+                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
+              )}
+            </ChartFrame>
           </CardContent>
         </Card>
         <Card>
           <CardHeader><CardTitle>Success vs failure</CardTitle></CardHeader>
-          <CardContent className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts.data?.data.successFailure ?? []}>
+          <CardContent className="h-80 min-w-0">
+            <ChartFrame>
+              {({ width, height }) => (
+              <BarChart width={width} height={height} data={charts.data?.data.successFailure ?? []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
@@ -65,7 +105,8 @@ export function DashboardPage() {
                 <Bar dataKey="success" fill="var(--chart-2)" />
                 <Bar dataKey="failure" fill="var(--destructive)" />
               </BarChart>
-            </ResponsiveContainer>
+              )}
+            </ChartFrame>
           </CardContent>
         </Card>
       </div>

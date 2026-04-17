@@ -264,22 +264,25 @@ export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronSchedu
   router.get("/dashboard/charts", async (request, response, next) => {
     try {
       const cronjobId = typeof request.query.cronjobId === "string" ? request.query.cronjobId : undefined;
-      const where = cronjobId ? { cronjobId } : {};
+      const where: Prisma.CronjobExecutionWhereInput = cronjobId ? { cronjobId } : { cronjob: { enabled: true } };
       const executions = await prisma.cronjobExecution.findMany({
         where,
-        orderBy: { startedAt: "asc" },
+        orderBy: { startedAt: "desc" },
         take: 100,
         include: { cronjob: true },
       });
+      const orderedExecutions = executions.reverse();
       response.json({
         data: {
-          responseTimes: executions.map((execution) => ({
+          responseTimes: orderedExecutions.map((execution) => ({
             timestamp: execution.startedAt,
             label: execution.startedAt.toISOString().slice(11, 19),
             durationMs: execution.durationMs,
+            cronjobId: execution.cronjobId,
             cronjobTitle: execution.cronjob.title,
+            cronjobEnabled: execution.cronjob.enabled,
           })),
-          successFailure: executions.map((execution) => ({
+          successFailure: orderedExecutions.map((execution) => ({
             timestamp: execution.startedAt,
             label: execution.startedAt.toISOString().slice(11, 19),
             success: execution.success ? 1 : 0,

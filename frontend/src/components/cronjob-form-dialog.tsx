@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -92,6 +93,9 @@ export function CronjobFormDialog({
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{cronjob ? "Edit cronjob" : "Create cronjob"}</DialogTitle>
+          <DialogDescription>
+            Configure the endpoint, timing, retry behavior, and alert settings for this cronjob.
+          </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={submit} className="space-y-5">

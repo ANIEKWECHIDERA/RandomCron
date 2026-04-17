@@ -1,5 +1,5 @@
-import { MoreHorizontal, Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, MoreHorizontal, Plus, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDelete } from "@/components/confirm-delete";
@@ -29,6 +30,8 @@ export function CronjobsPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Cronjob | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const queryClient = useQueryClient();
   const cronjobsQuery = useQuery({ queryKey: queryKeys.cronjobs, queryFn: api.cronjobs });
   const cronjobs = cronjobsQuery.data?.data ?? [];
@@ -37,6 +40,19 @@ export function CronjobsPage() {
     () => cronjobs.filter((job) => `${job.title} ${job.url}`.toLowerCase().includes(search.toLowerCase())),
     [cronjobs, search],
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const visibleCronjobs = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [currentPage, filtered, pageSize],
+  );
+  const visibleIds = visibleCronjobs.map((job) => job.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.includes(id));
+
+  useEffect(() => {
+    setPage(1);
+    setSelected([]);
+  }, [pageSize, search]);
 
   const mutate = async (action: () => Promise<unknown>, message: string) => {
     await action();
@@ -93,8 +109,14 @@ export function CronjobsPage() {
                   <TableRow>
                     <TableHead className="w-10">
                       <Checkbox
-                        checked={selected.length === filtered.length}
-                        onCheckedChange={(checked) => setSelected(checked ? filtered.map((job) => job.id) : [])}
+                        checked={allVisibleSelected}
+                        onCheckedChange={(checked) =>
+                          setSelected((current) =>
+                            checked
+                              ? Array.from(new Set([...current, ...visibleIds]))
+                              : current.filter((id) => !visibleIds.includes(id)),
+                          )
+                        }
                       />
                     </TableHead>
                     <TableHead>Title</TableHead>
@@ -106,7 +128,7 @@ export function CronjobsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((job) => (
+                  {visibleCronjobs.map((job) => (
                     <TableRow key={job.id}>
                       <TableCell>
                         <Checkbox
@@ -125,8 +147,12 @@ export function CronjobsPage() {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="size-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => void mutate(() => api.enableCronjob(job.id), "Cronjob enabled.")}>Enable</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => void mutate(() => api.disableCronjob(job.id), "Cronjob disabled.")}>Disable</DropdownMenuItem>
+                            {!job.enabled && (
+                              <DropdownMenuItem onClick={() => void mutate(() => api.enableCronjob(job.id), "Cronjob enabled.")}>Enable</DropdownMenuItem>
+                            )}
+                            {job.enabled && (
+                              <DropdownMenuItem onClick={() => void mutate(() => api.disableCronjob(job.id), "Cronjob disabled.")}>Disable</DropdownMenuItem>
+                            )}
                             <DropdownMenuItem asChild><Link to={`/cronjobs/${job.id}`}>History</Link></DropdownMenuItem>
                             <DropdownMenuItem onClick={() => { setEditing(job); setFormOpen(true); }}>Edit</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setDeleteIds([job.id])}>Delete</DropdownMenuItem>
@@ -137,6 +163,50 @@ export function CronjobsPage() {
                   ))}
                 </TableBody>
               </Table>
+              <div className="flex flex-col gap-3 border-t px-2 py-4 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Showing {filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}-
+                  {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Rows</span>
+                    <Select value={String(pageSize)} onValueChange={(value) => setPageSize(Number(value))}>
+                      <SelectTrigger className="h-8 w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[10, 20, 30, 40, 50].map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      disabled={currentPage <= 1}
+                      onClick={() => setPage((value) => Math.max(1, value - 1))}
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </CardContent>

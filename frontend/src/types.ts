@@ -64,7 +64,9 @@ export interface ChartData {
     timestamp: string;
     label: string;
     durationMs: number;
+    cronjobId?: string;
     cronjobTitle: string;
+    cronjobEnabled?: boolean;
   }>;
   successFailure: Array<{
     timestamp: string;

@@ -37,9 +37,9 @@ export const api = {
   bulkEnable: (ids: string[]) => request<{ data: Cronjob[] }>("/cronjobs/bulk/enable", { method: "POST", body: JSON.stringify({ ids }) }),
   bulkDisable: (ids: string[]) => request<{ data: Cronjob[] }>("/cronjobs/bulk/disable", { method: "POST", body: JSON.stringify({ ids }) }),
   bulkDelete: (ids: string[]) => request<void>("/cronjobs/bulk/delete", { method: "POST", body: JSON.stringify({ ids }) }),
-  history: (id: string, page = 1) =>
+  history: (id: string, page = 1, pageSize = 20) =>
     request<{ data: CronjobExecution[]; meta: { page: number; pageSize: number; total: number } }>(
-      `/cronjobs/${id}/executions?page=${page}&pageSize=20`,
+      `/cronjobs/${id}/executions?page=${page}&pageSize=${pageSize}`,
     ),
   execution: (id: string) => request<{ data: CronjobExecution }>(`/executions/${id}`),
   stats: () => request<{ data: DashboardStats }>("/dashboard/stats"),

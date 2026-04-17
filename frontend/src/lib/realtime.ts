@@ -160,6 +160,23 @@ function upsertExecution(queryClient: QueryClient, execution: CronjobExecution) 
       };
     },
   );
+  queryClient.setQueriesData<{ data: CronjobExecution[]; meta: { page: number; pageSize: number; total: number } }>(
+    { queryKey: queryKeys.historyRoot(execution.cronjobId) },
+    (current) => {
+      if (!current) return current;
+      const exists = current.data.some((item) => item.id === execution.id);
+      if (exists) {
+        return { ...current, data: current.data.map((item) => (item.id === execution.id ? execution : item)) };
+      }
+      if (current.meta.page !== 1) {
+        return { ...current, meta: { ...current.meta, total: current.meta.total + 1 } };
+      }
+      return {
+        meta: { ...current.meta, total: current.meta.total + 1 },
+        data: [execution, ...current.data].slice(0, current.meta.pageSize),
+      };
+    },
+  );
 
   queryClient.setQueryData<{ data: Cronjob }>(queryKeys.cronjob(execution.cronjobId), (current) =>
     current
@@ -192,7 +209,14 @@ function patchDashboardFromExecution(queryClient: QueryClient, execution: Cronjo
       data: {
         responseTimes: [
           ...current.data.responseTimes,
-          { timestamp: execution.startedAt, label, durationMs: execution.durationMs, cronjobTitle: execution.cronjobTitle ?? "Cronjob" },
+          {
+            timestamp: execution.startedAt,
+            label,
+            durationMs: execution.durationMs,
+            cronjobId: execution.cronjobId,
+            cronjobTitle: execution.cronjobTitle ?? "Cronjob",
+            cronjobEnabled: true,
+          },
         ].slice(-100),
         successFailure: [
           ...current.data.successFailure,

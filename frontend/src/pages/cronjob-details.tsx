@@ -1,18 +1,22 @@
-import { ArrowLeft, Edit, Play, Square } from "lucide-react";
-import { useState } from "react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Edit, Play, Square } from "lucide-react";
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import { Line, LineChart, Tooltip, XAxis, YAxis, CartesianGrid, Bar, BarChart, Legend } from "recharts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CronjobFormDialog } from "@/components/cronjob-form-dialog";
+import { ChartFrame } from "@/components/chart-frame";
 import { ExecutionDialog } from "@/components/execution-dialog";
 import { JsonView } from "@/components/json-view";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
+import { buildResponseTimeSeries, CHART_COLORS, type ResponseSeriesRow } from "@/lib/chart";
 import { formatDate, formatDuration } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 import type { Cronjob, CronjobExecution, CronjobFormValues } from "@/types";
@@ -21,6 +25,9 @@ export function CronjobDetailsPage() {
   const { id } = useParams();
   const [formOpen, setFormOpen] = useState(false);
   const [executionId, setExecutionId] = useState<string | null>(null);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState(10);
+  const [activeTab, setActiveTab] = useState("overview");
   const queryClient = useQueryClient();
   const cronjobQuery = useQuery({
     queryKey: queryKeys.cronjob(id ?? ""),
@@ -28,18 +35,28 @@ export function CronjobDetailsPage() {
     enabled: !!id,
   });
   const historyQuery = useQuery({
-    queryKey: queryKeys.history(id ?? ""),
-    queryFn: () => api.history(id!),
+    queryKey: queryKeys.history(id ?? "", historyPage, historyPageSize),
+    queryFn: () => api.history(id!, historyPage, historyPageSize),
+    enabled: !!id,
+  });
+  const chartQuery = useQuery({
+    queryKey: [...queryKeys.charts, id],
+    queryFn: () => api.charts(id),
     enabled: !!id,
   });
   const cronjob = cronjobQuery.data?.data ?? null;
   const history = historyQuery.data?.data ?? [];
+  const historyMeta = historyQuery.data?.meta ?? { page: historyPage, pageSize: historyPageSize, total: 0 };
+  const detailResponseTrend = useMemo(
+    () => buildResponseTimeSeries(chartQuery.data?.data.responseTimes ?? [], "all"),
+    [chartQuery.data?.data.responseTimes],
+  );
 
   const load = async () => {
     if (!id) return;
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.cronjob(id) }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.history(id) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.historyRoot(id) }),
     ]);
   };
 
@@ -81,7 +98,73 @@ export function CronjobDetailsPage() {
         <Info title="Average response" value={formatDuration(cronjob.averageResponseTimeMs)} />
       </div>
 
-      <Tabs defaultValue="overview">
+      <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Response time trend</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Display is capped at {formatDuration(detailResponseTrend.capMs)} to keep normal runs readable.
+            </p>
+          </CardHeader>
+          <CardContent className="h-72 min-w-0">
+            <ChartFrame>
+              {({ width, height }) => (
+              <LineChart width={width} height={height} data={detailResponseTrend.data}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis tickFormatter={(value) => formatDuration(Number(value))} />
+                <Legend />
+                <Tooltip
+                  formatter={(_value, _name, item) => {
+                    const payload = item.payload as ResponseSeriesRow;
+                    const dataKey = String(item.dataKey);
+                    const series = detailResponseTrend.series.find((itemSeries) => itemSeries.key === dataKey);
+                    const original = series ? payload.originalDurations[series.key] : undefined;
+                    return [
+                      original && original > detailResponseTrend.capMs
+                        ? `${formatDuration(original)} actual, shown at ${formatDuration(detailResponseTrend.capMs)}`
+                        : formatDuration(Number(_value)),
+                      series?.name ?? "Response time",
+                    ];
+                  }}
+                />
+                {detailResponseTrend.series.map((series, index) => (
+                  <Line
+                    key={series.key}
+                    type="monotone"
+                    dataKey={series.key}
+                    name={series.name}
+                    stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                    strokeWidth={2}
+                    dot={{ r: 2 }}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
+              )}
+            </ChartFrame>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>Success vs failure</CardTitle></CardHeader>
+          <CardContent className="h-72 min-w-0">
+            <ChartFrame>
+              {({ width, height }) => (
+              <BarChart width={width} height={height} data={chartQuery.data?.data.successFailure ?? []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="label" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="success" fill="var(--chart-2)" />
+                <Bar dataKey="failure" fill="var(--destructive)" />
+              </BarChart>
+              )}
+            </ChartFrame>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
@@ -97,7 +180,17 @@ export function CronjobDetailsPage() {
           <Info title="Max retries" value={String(cronjob.maxRetries)} />
         </TabsContent>
         <TabsContent value="history" className="mt-4">
-          <HistoryTable history={history} onOpen={setExecutionId} />
+          <HistoryTable
+            history={history}
+            meta={historyMeta}
+            pageSize={historyPageSize}
+            onOpen={setExecutionId}
+            onPageChange={setHistoryPage}
+            onPageSizeChange={(value) => {
+              setHistoryPageSize(value);
+              setHistoryPage(1);
+            }}
+          />
         </TabsContent>
         <TabsContent value="response" className="mt-4">
           <Card>
@@ -134,7 +227,24 @@ function Info({ title, value }: { title: string; value: string }) {
   );
 }
 
-function HistoryTable({ history, onOpen }: { history: CronjobExecution[]; onOpen: (id: string) => void }) {
+function HistoryTable({
+  history,
+  meta,
+  pageSize,
+  onOpen,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  history: CronjobExecution[];
+  meta: { page: number; pageSize: number; total: number };
+  pageSize: number;
+  onOpen: (id: string) => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(meta.total / pageSize));
+  const currentPage = Math.min(meta.page, totalPages);
+
   return (
     <Card>
       <CardContent className="pt-6">
@@ -164,6 +274,49 @@ function HistoryTable({ history, onOpen }: { history: CronjobExecution[]; onOpen
             ))}
           </TableBody>
         </Table>
+        <div className="flex flex-col gap-3 border-t px-2 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-muted-foreground">
+            Showing {meta.total === 0 ? 0 : (currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, meta.total)} of {meta.total}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Rows</span>
+              <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value))}>
+                <SelectTrigger className="h-8 w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[10, 20, 30, 40, 50].map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Page {currentPage} of {totalPages}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="icon"
+                variant="outline"
+                disabled={currentPage <= 1}
+                onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                disabled={currentPage >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
