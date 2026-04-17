@@ -12,26 +12,36 @@ RandomCron is a full-stack cronjob monitoring and management app. It runs multip
 - Email: Resend
 - HTTP execution: native `fetch`, no axios
 
-## Setup
+## Local Setup
 
 ```bash
 npm install
 cp .env.example .env
 npm run prisma:generate
-npm run dev
+npm run dev:all
 ```
 
-Run the dashboard during development:
+That starts both apps:
 
-```bash
-npm run dev:web
-```
+- Backend API and scheduler: `http://localhost:3000`
+- Frontend dashboard: `http://localhost:5173`
 
 The Vite dev server proxies `/api` to `http://localhost:3000`.
+
+You can also run them separately:
+
+```bash
+npm run dev      # backend
+npm run dev:web  # frontend
+```
 
 ## Production
 
 ```bash
+cp .env.production.example .env
+$env:DATABASE_PROVIDER="postgresql" # PowerShell
+npm run prisma:generate
+npm run prisma:deploy
 npm run build
 npm start
 ```
@@ -42,6 +52,7 @@ The backend serves the built frontend from `dist/public`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
+| `DATABASE_PROVIDER` | `sqlite` | Use `sqlite` locally and `postgresql` in production. |
 | `DATABASE_URL` | `file:./dev.db` | SQLite local database. Use a PostgreSQL URL after switching the Prisma provider. |
 | `PORT` | `3000` | Express API and production frontend port. |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | CORS origin for Vite development. |
@@ -89,16 +100,43 @@ The API masks sensitive request headers such as authorization and tokens before 
 ## Scripts
 
 ```bash
-npm run dev            # backend API and scheduler
-npm run dev:web        # Vite dashboard
-npm run build          # backend and frontend production build
-npm start              # run production server
-npm run typecheck      # backend typecheck
-npm run typecheck:web  # frontend typecheck
-npm run test:phase1    # persistence smoke test
-npm run test:phase2    # multi-job scheduler test
-npm run test:phase3    # API flow test
+npm run dev:all          # backend + frontend together
+npm run dev              # backend API and scheduler only
+npm run dev:web          # Vite dashboard only
+npm run build            # backend and frontend production build
+npm start                # run production server
+npm run typecheck        # backend typecheck
+npm run typecheck:web    # frontend typecheck
+npm run prisma:generate  # generate Prisma client for selected DATABASE_PROVIDER
+npm run prisma:migrate   # local migration for selected DATABASE_PROVIDER
+npm run prisma:deploy    # deploy migrations for selected DATABASE_PROVIDER
+npm run test:phase1      # persistence smoke test
+npm run test:phase2      # multi-job scheduler test
+npm run test:phase3      # API flow test
 ```
+
+## Database Modes
+
+Local SQLite:
+
+```env
+DATABASE_PROVIDER=sqlite
+DATABASE_URL="file:./dev.db"
+```
+
+Production PostgreSQL:
+
+```env
+DATABASE_PROVIDER=postgresql
+DATABASE_URL="postgresql://user:password@host:5432/randomcron?schema=public"
+```
+
+The Prisma command wrapper chooses the schema dynamically:
+
+- SQLite schema: `prisma/schema.prisma`
+- PostgreSQL schema: `prisma/postgresql/schema.prisma`
+
+Set `DATABASE_PROVIDER` before running `npm run prisma:generate`, `npm run prisma:migrate`, `npm run prisma:deploy`, or `npm run build`.
 
 ## Docker
 

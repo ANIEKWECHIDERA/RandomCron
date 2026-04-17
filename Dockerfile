@@ -1,6 +1,9 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
+ARG DATABASE_PROVIDER=postgresql
+ENV DATABASE_PROVIDER=$DATABASE_PROVIDER
+ENV DATABASE_URL=postgresql://randomcron:randomcron@localhost:5432/randomcron
 
 COPY package*.json ./
 RUN npm ci
@@ -14,6 +17,7 @@ RUN npm run build
 FROM node:22-alpine AS runtime
 
 ENV NODE_ENV=production
+ENV DATABASE_PROVIDER=postgresql
 WORKDIR /app
 
 COPY package*.json ./

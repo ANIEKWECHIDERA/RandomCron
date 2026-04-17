@@ -1,5 +1,6 @@
 import { ArrowLeft, Edit, Play, Square } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,33 +14,36 @@ import { JsonView } from "@/components/json-view";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { formatDate, formatDuration } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import type { Cronjob, CronjobExecution, CronjobFormValues } from "@/types";
 
 export function CronjobDetailsPage() {
   const { id } = useParams();
-  const [cronjob, setCronjob] = useState<Cronjob | null>(null);
-  const [history, setHistory] = useState<CronjobExecution[]>([]);
-  const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [executionId, setExecutionId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const cronjobQuery = useQuery({
+    queryKey: queryKeys.cronjob(id ?? ""),
+    queryFn: () => api.cronjob(id!),
+    enabled: !!id,
+  });
+  const historyQuery = useQuery({
+    queryKey: queryKeys.history(id ?? ""),
+    queryFn: () => api.history(id!),
+    enabled: !!id,
+  });
+  const cronjob = cronjobQuery.data?.data ?? null;
+  const history = historyQuery.data?.data ?? [];
 
   const load = async () => {
     if (!id) return;
-    setLoading(true);
-    try {
-      const [jobResponse, historyResponse] = await Promise.all([api.cronjob(id), api.history(id)]);
-      setCronjob(jobResponse.data);
-      setHistory(historyResponse.data);
-    } finally {
-      setLoading(false);
-    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.cronjob(id) }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.history(id) }),
+    ]);
   };
 
-  useEffect(() => {
-    void load();
-  }, [id]);
-
-  if (loading || !cronjob) {
+  if (cronjobQuery.isLoading || historyQuery.isLoading || !cronjob) {
     return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-96" /></div>;
   }
 

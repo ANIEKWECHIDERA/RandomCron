@@ -1,5 +1,5 @@
 import { Activity, AlertTriangle, CheckCircle2, Clock, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -9,27 +9,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { formatDate, formatDuration } from "@/lib/format";
-import type { ChartData, Cronjob, CronjobExecution, DashboardStats } from "@/types";
+import { queryKeys } from "@/lib/query-keys";
 
 export function DashboardPage() {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [charts, setCharts] = useState<ChartData | null>(null);
-  const [events, setEvents] = useState<CronjobExecution[]>([]);
-  const [streaks, setStreaks] = useState<Cronjob[]>([]);
-  const [loading, setLoading] = useState(true);
+  const stats = useQuery({ queryKey: queryKeys.stats, queryFn: api.stats });
+  const charts = useQuery({ queryKey: queryKeys.charts, queryFn: () => api.charts() });
+  const events = useQuery({ queryKey: queryKeys.recentEvents, queryFn: api.recentEvents });
+  const streaks = useQuery({ queryKey: queryKeys.failureStreaks, queryFn: api.failureStreaks });
 
-  useEffect(() => {
-    Promise.all([api.stats(), api.charts(), api.recentEvents(), api.failureStreaks()])
-      .then(([statsResponse, chartResponse, eventsResponse, streakResponse]) => {
-        setStats(statsResponse.data);
-        setCharts(chartResponse.data);
-        setEvents(eventsResponse.data);
-        setStreaks(streakResponse.data);
-      })
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
+  if (stats.isLoading || charts.isLoading || events.isLoading || streaks.isLoading) {
     return <div className="space-y-4"><Skeleton className="h-28" /><Skeleton className="h-80" /></div>;
   }
 
@@ -44,10 +32,10 @@ export function DashboardPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Stat title="Enabled Cronjobs" value={stats?.enabledCronjobs ?? 0} icon={Activity} />
-        <Stat title="Disabled Cronjobs" value={stats?.disabledCronjobs ?? 0} icon={Clock} />
-        <Stat title="Successful Cronjobs" value={stats?.successfulCronjobs ?? 0} icon={CheckCircle2} />
-        <Stat title="Failed Cronjobs" value={stats?.failedCronjobs ?? 0} icon={AlertTriangle} />
+        <Stat title="Enabled Cronjobs" value={stats.data?.data.enabledCronjobs ?? 0} icon={Activity} />
+        <Stat title="Disabled Cronjobs" value={stats.data?.data.disabledCronjobs ?? 0} icon={Clock} />
+        <Stat title="Successful Cronjobs" value={stats.data?.data.successfulCronjobs ?? 0} icon={CheckCircle2} />
+        <Stat title="Failed Cronjobs" value={stats.data?.data.failedCronjobs ?? 0} icon={AlertTriangle} />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[2fr_1fr]">
@@ -55,7 +43,7 @@ export function DashboardPage() {
           <CardHeader><CardTitle>Response time trend</CardTitle></CardHeader>
           <CardContent className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={charts?.responseTimes ?? []}>
+              <AreaChart data={charts.data?.data.responseTimes ?? []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
@@ -69,7 +57,7 @@ export function DashboardPage() {
           <CardHeader><CardTitle>Success vs failure</CardTitle></CardHeader>
           <CardContent className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={charts?.successFailure ?? []}>
+              <BarChart data={charts.data?.data.successFailure ?? []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
@@ -89,7 +77,7 @@ export function DashboardPage() {
             <Table>
               <TableHeader><TableRow><TableHead>Event</TableHead><TableHead>Date</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
               <TableBody>
-                {events.map((event) => (
+                {(events.data?.data ?? []).map((event) => (
                   <TableRow key={event.id}>
                     <TableCell>
                       <div className="font-medium">{event.cronjobTitle}</div>
@@ -106,10 +94,10 @@ export function DashboardPage() {
         <Card>
           <CardHeader><CardTitle>Consecutive failures</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            {streaks.length === 0 ? (
+            {(streaks.data?.data ?? []).length === 0 ? (
               <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">No active failure streaks.</div>
             ) : (
-              streaks.map((job) => (
+              (streaks.data?.data ?? []).map((job) => (
                 <Link key={job.id} to={`/cronjobs/${job.id}`} className="block rounded-md border p-3 hover:bg-accent">
                   <div className="flex items-center justify-between">
                     <span className="font-medium">{job.title}</span>

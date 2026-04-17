@@ -1,5 +1,6 @@
 import { MoreHorizontal, Plus, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -19,40 +20,29 @@ import { CronjobFormDialog } from "@/components/cronjob-form-dialog";
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import type { Cronjob, CronjobFormValues } from "@/types";
 
 export function CronjobsPage() {
-  const [cronjobs, setCronjobs] = useState<Cronjob[]>([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Cronjob | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
+  const queryClient = useQueryClient();
+  const cronjobsQuery = useQuery({ queryKey: queryKeys.cronjobs, queryFn: api.cronjobs });
+  const cronjobs = cronjobsQuery.data?.data ?? [];
 
   const filtered = useMemo(
     () => cronjobs.filter((job) => `${job.title} ${job.url}`.toLowerCase().includes(search.toLowerCase())),
     [cronjobs, search],
   );
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      setCronjobs((await api.cronjobs()).data);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, []);
-
   const mutate = async (action: () => Promise<unknown>, message: string) => {
     await action();
     toast.success(message);
     setSelected([]);
-    await load();
+    await queryClient.invalidateQueries({ queryKey: queryKeys.cronjobs });
   };
 
   const submit = async (values: CronjobFormValues) => {
@@ -92,7 +82,7 @@ export function CronjobsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {cronjobsQuery.isLoading ? (
             <div className="space-y-3"><Skeleton className="h-10" /><Skeleton className="h-24" /></div>
           ) : filtered.length === 0 ? (
             <div className="rounded-md border border-dashed p-10 text-center text-sm text-muted-foreground">No cronjobs yet.</div>

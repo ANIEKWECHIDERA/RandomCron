@@ -1,10 +1,12 @@
 import { Router } from "express";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { MultiCronScheduler } from "../scheduler/scheduler.js";
+import { createCronjobEvent } from "../realtime/events.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { bulkIdsSchema, cronjobInputSchema, cronjobUpdateSchema, paginationSchema } from "./schemas.js";
 import { serializeCronjob, serializeExecution } from "./serializers.js";
 
-export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronScheduler): Router {
+export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronScheduler, realtime: RealtimeHub): Router {
   const router = Router();
 
   router.get("/health", (_request, response) => {
@@ -36,6 +38,7 @@ export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronSchedu
       const cronjob = await prisma.cronjob.create({
         data: normalizeCronjobInput(input) as Prisma.CronjobUncheckedCreateInput,
       });
+      realtime.broadcast(createCronjobEvent("cronjob.created", cronjob, { cronjob: serializeCronjob(cronjob) }));
       if (cronjob.enabled) {
         scheduler.schedule(cronjob, 0);
       }
@@ -76,6 +79,10 @@ export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronSchedu
       const { ids } = bulkIdsSchema.parse(request.body);
       for (const id of ids) {
         await scheduler.remove(id);
+        realtime.broadcast({
+          eventType: "cronjob.deleted",
+          cronjobId: id,
+        });
       }
       response.status(204).send();
     } catch (error) {
@@ -124,6 +131,7 @@ export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronSchedu
         where: { id: request.params.id },
         data: normalizeCronjobInput(input) as Prisma.CronjobUncheckedUpdateInput,
       });
+      realtime.broadcast(createCronjobEvent("cronjob.updated", cronjob, { cronjob: serializeCronjob(cronjob) }));
       if (cronjob.enabled) {
         scheduler.schedule(cronjob);
       } else {
@@ -156,6 +164,10 @@ export function createApiRouter(prisma: PrismaClient, scheduler: MultiCronSchedu
   router.delete("/cronjobs/:id", async (request, response, next) => {
     try {
       await scheduler.remove(request.params.id);
+      realtime.broadcast({
+        eventType: "cronjob.deleted",
+        cronjobId: request.params.id,
+      });
       response.status(204).send();
     } catch (error) {
       next(error);

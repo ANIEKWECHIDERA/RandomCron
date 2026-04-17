@@ -1,6 +1,8 @@
 import type { Cronjob, PrismaClient } from "@prisma/client";
 import type { AppConfig } from "../config/index.js";
 import type { Logger } from "../logger/index.js";
+import { createCronjobEvent } from "../realtime/events.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { calculateBackoffDelayMs } from "../utils/backoff.js";
 import { randomIntervalMs } from "../utils/random.js";
 import { CronjobExecutor } from "./executor.js";
@@ -19,8 +21,9 @@ export class MultiCronScheduler {
     private readonly prisma: PrismaClient,
     config: AppConfig,
     private readonly logger: Logger,
+    private readonly realtime: RealtimeHub,
   ) {
-    this.executor = new CronjobExecutor(prisma, config, logger);
+    this.executor = new CronjobExecutor(prisma, config, logger, realtime);
   }
 
   async start(): Promise<void> {
@@ -35,18 +38,26 @@ export class MultiCronScheduler {
   async enable(cronjobId: string): Promise<Cronjob> {
     const cronjob = await this.prisma.cronjob.update({
       where: { id: cronjobId },
-      data: { enabled: true, currentStatus: "scheduled" },
+      data: {
+        enabled: true,
+        currentStatus: "scheduled",
+        consecutiveFailures: 0,
+        nextExecutionAt: null,
+      },
     });
+    this.realtime.broadcast(createCronjobEvent("cronjob.enabled", cronjob, { cronjob }));
     this.schedule(cronjob, 0);
     return cronjob;
   }
 
   async disable(cronjobId: string): Promise<Cronjob> {
     this.cancel(cronjobId);
-    return this.prisma.cronjob.update({
+    const cronjob = await this.prisma.cronjob.update({
       where: { id: cronjobId },
       data: { enabled: false, currentStatus: "disabled", nextExecutionAt: null },
     });
+    this.realtime.broadcast(createCronjobEvent("cronjob.disabled", cronjob, { cronjob }));
+    return cronjob;
   }
 
   async remove(cronjobId: string): Promise<void> {
@@ -78,6 +89,9 @@ export class MultiCronScheduler {
         where: { id: cronjob.id },
         data: { currentStatus: "scheduled", nextExecutionAt },
       })
+      .then((updatedCronjob) => {
+        this.realtime.broadcast(createCronjobEvent("cronjob.scheduled", updatedCronjob, { cronjob: updatedCronjob }));
+      })
       .catch((error) => this.logger.error({ error, cronjobId: cronjob.id }, "Failed to persist next execution time."));
   }
 
@@ -103,10 +117,16 @@ export class MultiCronScheduler {
         return;
       }
 
-      await this.prisma.cronjob.update({
+      const runningCronjob = await this.prisma.cronjob.update({
         where: { id: cronjobId },
         data: { currentStatus: "running", nextExecutionAt: null },
       });
+      this.realtime.broadcast(
+        createCronjobEvent("execution.started", runningCronjob, {
+          startedAt: new Date().toISOString(),
+          cronjob: runningCronjob,
+        }),
+      );
 
       const outcome = await this.executor.execute(cronjob);
       const latest = await this.prisma.cronjob.findUnique({ where: { id: cronjobId } });

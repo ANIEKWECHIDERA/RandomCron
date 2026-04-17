@@ -12,6 +12,7 @@ export type HttpMethod =
   | "OPTIONS";
 
 export interface AppConfig {
+  databaseProvider: "sqlite" | "postgresql";
   databaseUrl: string;
   port: number;
   clientOrigin: string;
@@ -48,6 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const errors: string[] = [];
 
   const databaseUrl = emptyToUndefined(env.DATABASE_URL) ?? "file:./dev.db";
+  const databaseProvider = parseDatabaseProvider(env.DATABASE_PROVIDER, databaseUrl, errors);
   const port = readPositiveInteger(env, "PORT", 3000, errors);
   const clientOrigin = emptyToUndefined(env.CLIENT_ORIGIN) ?? "http://localhost:5173";
 
@@ -60,6 +62,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const alertFromEmail = emptyToUndefined(env.ALERT_FROM_EMAIL);
 
   return {
+    databaseProvider,
     databaseUrl,
     port,
     clientOrigin,
@@ -68,6 +71,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(alertFromEmail ? { alertFromEmail } : {}),
     logLevel: env.LOG_LEVEL || DEFAULT_LOG_LEVEL,
   };
+}
+
+function parseDatabaseProvider(
+  rawValue: string | undefined,
+  databaseUrl: string,
+  errors: string[],
+): "sqlite" | "postgresql" {
+  const value = emptyToUndefined(rawValue)?.toLowerCase();
+  if (!value) {
+    return databaseUrl.startsWith("postgresql://") || databaseUrl.startsWith("postgres://") ? "postgresql" : "sqlite";
+  }
+
+  if (value === "sqlite") {
+    return "sqlite";
+  }
+
+  if (value === "postgresql" || value === "postgres" || value === "prod" || value === "production") {
+    return "postgresql";
+  }
+
+  errors.push("DATABASE_PROVIDER must be sqlite or postgresql.");
+  return "sqlite";
 }
 
 function readRequiredString(env: NodeJS.ProcessEnv, name: string, errors: string[]): string | undefined {

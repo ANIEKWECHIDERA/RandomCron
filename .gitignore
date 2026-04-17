@@ -5,3 +5,4 @@ npm-debug.log*
 prisma/dev.db
 prisma/dev.db-journal
 .env.example
+.env.production

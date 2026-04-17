@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { PrismaClient } from "@prisma/client";
 import type { AppConfig } from "../config/index.js";
 import type { Logger } from "../logger/index.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import type { MultiCronScheduler } from "../scheduler/scheduler.js";
 import { createApiRouter } from "./routes.js";
 
@@ -13,12 +14,14 @@ export function createApp(
   scheduler: MultiCronScheduler,
   config: AppConfig,
   logger: Logger,
+  realtime: RealtimeHub,
 ) {
   const app = express();
 
   app.use(cors({ origin: config.clientOrigin, credentials: true }));
   app.use(express.json({ limit: "1mb" }));
-  app.use("/api", createApiRouter(prisma, scheduler));
+  app.use("/api/realtime", realtime.router());
+  app.use("/api", createApiRouter(prisma, scheduler, realtime));
 
   const staticDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
   app.use(express.static(staticDir));

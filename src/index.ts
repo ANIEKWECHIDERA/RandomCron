@@ -3,6 +3,7 @@ import { createApp } from "./api/app.js";
 import { ensureDatabase } from "./db/init.js";
 import { prisma } from "./db/client.js";
 import { createLogger } from "./logger/index.js";
+import { RealtimeHub } from "./realtime/hub.js";
 import { MultiCronScheduler } from "./scheduler/scheduler.js";
 
 try {
@@ -13,18 +14,24 @@ try {
   logger.info(
     {
       port: config.port,
+      databaseProvider: config.databaseProvider,
       databaseUrl: config.databaseUrl,
     },
     "Configuration loaded successfully.",
   );
 
-  await ensureDatabase(prisma);
-  logger.info("Database is ready.");
+  if (config.databaseProvider === "sqlite") {
+    await ensureDatabase(prisma);
+    logger.info("SQLite database is ready.");
+  } else {
+    logger.info("PostgreSQL mode enabled. Run npm run prisma:deploy before starting production.");
+  }
 
-  const scheduler = new MultiCronScheduler(prisma, config, logger);
+  const realtime = new RealtimeHub(logger);
+  const scheduler = new MultiCronScheduler(prisma, config, logger, realtime);
   await scheduler.start();
 
-  const app = createApp(prisma, scheduler, config, logger);
+  const app = createApp(prisma, scheduler, config, logger, realtime);
   const server = app.listen(config.port, () => {
     logger.info({ port: config.port }, "RandomCron API started.");
   });

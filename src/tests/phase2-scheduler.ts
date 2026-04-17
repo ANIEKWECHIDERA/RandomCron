@@ -5,6 +5,7 @@ import { loadConfig } from "../config/index.js";
 import { prisma } from "../db/client.js";
 import { ensureDatabase } from "../db/init.js";
 import { createLogger } from "../logger/index.js";
+import { RealtimeHub } from "../realtime/hub.js";
 import { MultiCronScheduler } from "../scheduler/scheduler.js";
 import { sleep } from "../utils/sleep.js";
 
@@ -38,7 +39,8 @@ if (!address || typeof address === "string") {
 await ensureDatabase(prisma);
 const logger = createLogger("silent");
 const config = loadConfig();
-const scheduler = new MultiCronScheduler(prisma, config, logger);
+const realtime = new RealtimeHub(logger);
+const scheduler = new MultiCronScheduler(prisma, config, logger, realtime);
 const testKey = randomUUID();
 
 const fast = await prisma.cronjob.create({

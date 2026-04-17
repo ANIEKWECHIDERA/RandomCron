@@ -3,6 +3,8 @@ import type { AppConfig } from "../config/index.js";
 import { AlertEmailService } from "../email/alerts.js";
 import { isHttpRequestFailure, performHttpRequest, toErrorMessage } from "../http/client.js";
 import type { Logger } from "../logger/index.js";
+import { createExecutionEvent } from "../realtime/events.js";
+import type { RealtimeHub } from "../realtime/hub.js";
 import { truncateText } from "../utils/text.js";
 import type { FailureDetails } from "../worker/worker.js";
 
@@ -19,6 +21,7 @@ export class CronjobExecutor {
     private readonly prisma: PrismaClient,
     private readonly config: AppConfig,
     private readonly logger: Logger,
+    private readonly realtime: RealtimeHub,
   ) {
     if (config.resendApiKey && config.alertFromEmail && config.alertToEmail) {
       this.alerts = new AlertEmailService(
@@ -48,7 +51,7 @@ export class CronjobExecutor {
       const result = await performHttpRequest(requestConfig);
       const completedAt = new Date();
 
-      await this.prisma.$transaction([
+      const [execution, updatedCronjob] = await this.prisma.$transaction([
         this.prisma.cronjobExecution.create({
           data: {
             cronjobId: cronjob.id,
@@ -80,6 +83,12 @@ export class CronjobExecutor {
       ]);
 
       this.alerts?.clearDedupGuard();
+      this.realtime.broadcast(
+        createExecutionEvent("execution.succeeded", updatedCronjob, execution, {
+          execution,
+          cronjob: updatedCronjob,
+        }),
+      );
       this.logger.info({ cronjobId: cronjob.id, status: result.status, durationMs: result.durationMs }, "Cronjob execution succeeded.");
 
       return { success: true, consecutiveFailures: 0, shouldContinue: true };
@@ -115,7 +124,7 @@ export class CronjobExecutor {
         await this.alerts.sendStoppingAlert(failureDetails);
       }
 
-      await this.prisma.$transaction([
+      const [execution, updatedCronjob] = await this.prisma.$transaction([
         this.prisma.cronjobExecution.create({
           data: {
             cronjobId: cronjob.id,
@@ -148,6 +157,41 @@ export class CronjobExecutor {
           },
         }),
       ]);
+
+      this.realtime.broadcast(
+        createExecutionEvent("execution.failed", updatedCronjob, execution, {
+          execution,
+          cronjob: updatedCronjob,
+        }),
+      );
+      this.realtime.broadcast({
+        eventType: "execution.retry_changed",
+        cronjobId: updatedCronjob.id,
+        cronjobTitle: updatedCronjob.title,
+        executionId: execution.id,
+        status: updatedCronjob.currentStatus,
+        retryAttempt: execution.retryAttempt,
+        consecutiveFailures: updatedCronjob.consecutiveFailures,
+      });
+      this.realtime.broadcast({
+        eventType: "cronjob.failure_count_changed",
+        cronjobId: updatedCronjob.id,
+        cronjobTitle: updatedCronjob.title,
+        status: updatedCronjob.currentStatus,
+        consecutiveFailures: updatedCronjob.consecutiveFailures,
+      });
+      if (shouldStop) {
+        this.realtime.broadcast({
+          eventType: "cronjob.final_stopped",
+          cronjobId: updatedCronjob.id,
+          cronjobTitle: updatedCronjob.title,
+          executionId: execution.id,
+          status: updatedCronjob.currentStatus,
+          consecutiveFailures: updatedCronjob.consecutiveFailures,
+          retryAttempt: execution.retryAttempt,
+          completedAt: execution.completedAt.toISOString(),
+        });
+      }
 
       this.logger.error(
         {

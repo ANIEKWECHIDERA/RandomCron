@@ -1,6 +1,8 @@
 import { Activity, LayoutDashboard, ListChecks } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { LiveStatus } from "@/components/live-status";
+import { useRealtimeStatus } from "@/components/realtime-provider";
 
 const links = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -8,6 +10,8 @@ const links = [
 ];
 
 export function AppLayout() {
+  const realtimeStatus = useRealtimeStatus();
+
   return (
     <div className="min-h-screen bg-muted/30">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-background p-4 md:block">
@@ -44,7 +48,10 @@ export function AppLayout() {
             <div className="md:hidden">
               <p className="font-semibold">RandomCron</p>
             </div>
-            <div className="ml-auto text-sm text-muted-foreground">Randomized endpoint monitoring</div>
+            <div className="ml-auto flex items-center gap-3 text-sm text-muted-foreground">
+              <LiveStatus status={realtimeStatus} />
+              <span className="hidden sm:inline">Randomized endpoint monitoring</span>
+            </div>
           </div>
         </header>
         <main className="p-4 md:p-8">
