@@ -1,92 +1,112 @@
-# Random Cron Worker
+# RandomCron
 
-A production-ready Node.js worker that pings a configurable HTTP endpoint at random intervals. It uses native `fetch`, timeout handling with `AbortController`, structured logs, retry backoff, and Resend email alerts.
+RandomCron is a full-stack cronjob monitoring and management app. It runs multiple randomized HTTP workers concurrently, records execution history, sends Resend alerts on failures, and provides a React dashboard for managing jobs and inspecting responses.
 
-## Requirements
+## Stack
 
-- Node.js 20+
-- A Resend API key for failure alerts
+- Backend: Node.js, TypeScript, Express, Prisma
+- Database: SQLite for local development, schema designed to move to PostgreSQL later
+- Frontend: React, TypeScript, Vite
+- UI: shadcn/ui components from the shadcn registry
+- Charts: Recharts
+- Email: Resend
+- HTTP execution: native `fetch`, no axios
 
 ## Setup
 
 ```bash
 npm install
 cp .env.example .env
+npm run prisma:generate
 npm run dev
 ```
 
-For production:
+Run the dashboard during development:
+
+```bash
+npm run dev:web
+```
+
+The Vite dev server proxies `/api` to `http://localhost:3000`.
+
+## Production
 
 ```bash
 npm run build
 npm start
 ```
 
+The backend serves the built frontend from `dist/public`.
+
 ## Configuration
 
-| Variable | Required | Default | Notes |
-| --- | --- | --- | --- |
-| `TARGET_URL` | yes | none | Endpoint to ping. |
-| `REQUEST_METHOD` | no | `GET` | Any standard HTTP method. |
-| `REQUEST_TIMEOUT_MS` | no | `30000` | Fetch timeout. |
-| `MIN_INTERVAL_MS` | no | `60000` | Minimum random wait before a normal request. |
-| `MAX_INTERVAL_MS` | no | `840000` | Maximum random wait. It can never exceed 14 minutes. |
-| `MAX_RETRIES` | no | `10` | Maximum consecutive failures before stopping. |
-| `ALLOW_NON_2XX` | no | `false` | Set `true` to treat non-2xx responses as success. |
-| `RESEND_API_KEY` | yes | none | Resend API key for alerts. |
-| `ALERT_TO_EMAIL` | yes | none | Destination alert email. |
-| `ALERT_FROM_EMAIL` | yes | none | Sender identity verified in Resend. |
-| `AUTH_BEARER_TOKEN` | no | none | Adds an `Authorization: Bearer ...` header. |
-| `CUSTOM_HEADERS` | no | `{}` | JSON object of extra headers. |
-| `REQUEST_BODY` | no | none | Request body for methods like `POST` or `PUT`. |
-| `LOG_LEVEL` | no | `info` | Pino log level. |
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `DATABASE_URL` | `file:./dev.db` | SQLite local database. Use a PostgreSQL URL after switching the Prisma provider. |
+| `PORT` | `3000` | Express API and production frontend port. |
+| `CLIENT_ORIGIN` | `http://localhost:5173` | CORS origin for Vite development. |
+| `RESEND_API_KEY` | empty | Enables failure alert delivery when set with both alert emails. |
+| `ALERT_TO_EMAIL` | empty | Default alert recipient. |
+| `ALERT_FROM_EMAIL` | empty | Default verified Resend sender. |
+| `LOG_LEVEL` | `info` | Pino log level. |
 
-Startup validation fails fast if the URL is invalid, intervals are unsafe, JSON headers are malformed, or required alert settings are missing.
+## Architecture
 
-## Runtime Logic
+The backend stores `Cronjob` and `CronjobExecution` records with Prisma. Deletes are hard deletes with cascade, so deleting a cronjob also removes its execution history.
 
-The worker waits a uniform random delay between `MIN_INTERVAL_MS` and `MAX_INTERVAL_MS` before each normal ping. Failed requests increment a consecutive failure counter and retry with exponential backoff plus jitter. Retry waits are capped by `MAX_INTERVAL_MS`, which itself is capped at 840000 ms.
+The scheduler owns one timer per enabled cronjob. Each job schedules its next run only after the current run finishes, which prevents overlapping executions for the same cronjob while allowing different cronjobs to run concurrently. Failed jobs use exponential backoff with jitter and are disabled after `maxRetries` consecutive failures.
 
-Each failed attempt sends one Resend alert with timestamp, endpoint, attempt number, error summary, and response details when available. If the worker reaches `MAX_RETRIES`, it sends a final stopping alert and exits with a non-zero code.
+The execution layer reuses the native-fetch request logic:
+
+- `AbortController` timeouts
+- non-2xx failure handling unless `allowNon2xx` is enabled
+- JSON pretty-printing when possible
+- text/html/plain text capture without dangerous rendering
+- safe truncation for previews
+- persisted request/response headers and bodies
+
+The API masks sensitive request headers such as authorization and tokens before sending cronjob or execution data to the frontend.
+
+## API Coverage
+
+- `GET /api/cronjobs`
+- `POST /api/cronjobs`
+- `GET /api/cronjobs/:id`
+- `PATCH /api/cronjobs/:id`
+- `POST /api/cronjobs/:id/enable`
+- `POST /api/cronjobs/:id/disable`
+- `DELETE /api/cronjobs/:id`
+- `POST /api/cronjobs/bulk/enable`
+- `POST /api/cronjobs/bulk/disable`
+- `POST /api/cronjobs/bulk/delete`
+- `GET /api/cronjobs/:id/executions`
+- `GET /api/executions/:id`
+- `GET /api/dashboard/stats`
+- `GET /api/dashboard/charts`
+- `GET /api/dashboard/recent-events`
+- `GET /api/dashboard/failure-streaks`
 
 ## Scripts
 
 ```bash
-npm run dev        # run TypeScript directly
-npm run build      # compile to dist
-npm start          # run compiled worker
-npm run typecheck  # type-check without emitting
-npm run pm2:start  # start with PM2 sample config
+npm run dev            # backend API and scheduler
+npm run dev:web        # Vite dashboard
+npm run build          # backend and frontend production build
+npm start              # run production server
+npm run typecheck      # backend typecheck
+npm run typecheck:web  # frontend typecheck
+npm run test:phase1    # persistence smoke test
+npm run test:phase2    # multi-job scheduler test
+npm run test:phase3    # API flow test
 ```
 
 ## Docker
 
 ```bash
-docker build -t random-cron-worker .
-docker run --env-file .env random-cron-worker
+docker build -t randomcron .
+docker run --env-file .env -p 3000:3000 randomcron
 ```
 
-## PM2
+## Notes
 
-```bash
-npm run build
-npm run pm2:start
-```
-
-The sample PM2 config runs one worker process and lets the app terminate with a non-zero code after max failures. PM2 can then restart it according to your process policy.
-
-## Response Logging
-
-Each request logs:
-
-- timestamp
-- request method and URL
-- status code and status text
-- useful response headers
-- parsed and pretty-printed JSON when possible
-- text/html/plain text bodies otherwise
-- truncation metadata for large bodies
-
-## Shutdown
-
-The worker handles `SIGINT` and `SIGTERM`. If it is sleeping, shutdown interrupts the sleep. If a request is already in flight, the app lets that request finish, logs the result, and then exits the loop.
+Prisma migration files are included under `prisma/migrations`. In this local Node 24 environment, Prisma's schema engine returned a blank engine error, so the app also includes an idempotent `ensureDatabase` startup helper that applies the same SQLite tables. On a standard Node 20/22 production runtime, `npm run prisma:deploy` can be used normally.

@@ -1,37 +1,47 @@
 import { ConfigError, loadConfig } from "./config/index.js";
-import { AlertEmailService } from "./email/alerts.js";
+import { createApp } from "./api/app.js";
+import { ensureDatabase } from "./db/init.js";
+import { prisma } from "./db/client.js";
 import { createLogger } from "./logger/index.js";
-import { MaxRetriesReachedError, RandomCronWorker } from "./worker/worker.js";
+import { MultiCronScheduler } from "./scheduler/scheduler.js";
 
 try {
   const config = loadConfig();
   const logger = createLogger(config.logLevel);
-  const alerts = new AlertEmailService(config, logger);
-  const worker = new RandomCronWorker(config, logger, alerts);
-
-  process.once("SIGINT", () => worker.stop("SIGINT received."));
-  process.once("SIGTERM", () => worker.stop("SIGTERM received."));
+  process.env.DATABASE_URL = config.databaseUrl;
 
   logger.info(
     {
-      targetUrl: config.targetUrl,
-      requestMethod: config.requestMethod,
-      minIntervalMs: config.minIntervalMs,
-      maxIntervalMs: config.maxIntervalMs,
-      maxRetries: config.maxRetries,
+      port: config.port,
+      databaseUrl: config.databaseUrl,
     },
     "Configuration loaded successfully.",
   );
 
-  await worker.start();
+  await ensureDatabase(prisma);
+  logger.info("Database is ready.");
+
+  const scheduler = new MultiCronScheduler(prisma, config, logger);
+  await scheduler.start();
+
+  const app = createApp(prisma, scheduler, config, logger);
+  const server = app.listen(config.port, () => {
+    logger.info({ port: config.port }, "RandomCron API started.");
+  });
+
+  const shutdown = async (reason: string) => {
+    logger.info({ reason }, "Shutdown requested.");
+    server.close();
+    await scheduler.shutdown(reason);
+    await prisma.$disconnect();
+  };
+
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
 } catch (error) {
   if (error instanceof ConfigError) {
     console.error(error.message);
     process.exitCode = 1;
-  } else if (error instanceof MaxRetriesReachedError) {
-    process.exitCode = 1;
-  } else if (error instanceof Error && error.message.includes("SIG")) {
-    process.exitCode = 0;
   } else {
     console.error(error);
     process.exitCode = 1;

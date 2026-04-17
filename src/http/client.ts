@@ -1,5 +1,14 @@
-import type { AppConfig } from "../config/index.js";
+import type { HttpMethod } from "../config/index.js";
 import { parseResponseBody, type ParsedResponseBody } from "./response.js";
+
+export interface HttpRequestConfig {
+  targetUrl: string;
+  requestMethod: HttpMethod;
+  requestTimeoutMs: number;
+  allowNon2xx: boolean;
+  customHeaders: Record<string, string>;
+  requestBody?: string;
+}
 
 export interface HttpRequestResult extends ParsedResponseBody {
   timestamp: string;
@@ -17,7 +26,7 @@ export interface HttpRequestFailure extends Error {
   cause?: unknown;
 }
 
-export async function performHttpRequest(config: AppConfig): Promise<HttpRequestResult> {
+export async function performHttpRequest(config: HttpRequestConfig): Promise<HttpRequestResult> {
   const startedAt = Date.now();
   const timestamp = new Date().toISOString();
   const controller = new AbortController();
@@ -69,12 +78,8 @@ export async function performHttpRequest(config: AppConfig): Promise<HttpRequest
   }
 }
 
-function buildHeaders(config: AppConfig): HeadersInit {
+function buildHeaders(config: HttpRequestConfig): HeadersInit {
   const headers: Record<string, string> = { ...config.customHeaders };
-
-  if (config.authBearerToken) {
-    headers.Authorization = `Bearer ${config.authBearerToken}`;
-  }
 
   if (config.requestBody && !hasHeader(headers, "content-type")) {
     headers["Content-Type"] = "application/json";

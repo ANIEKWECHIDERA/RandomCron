@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Cronjob {
+  id                  String             @id @default(cuid())
+  title               String
+  url                 String
+  method              String             @default("GET")
+  headers             Json?
+  body                String?
+  minIntervalMs       Int                @default(60000)
+  maxIntervalMs       Int                @default(840000)
+  timeoutMs           Int                @default(30000)
+  maxRetries          Int                @default(10)
+  enabled             Boolean            @default(true)
+  currentStatus       String             @default("idle")
+  consecutiveFailures Int                @default(0)
+  lastExecutionAt     DateTime?
+  nextExecutionAt     DateTime?
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  alertToEmail        String?
+  alertFromEmail      String?
+  allowNon2xx         Boolean            @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  executions          CronjobExecution[]
+
+  @@index([enabled])
+  @@index([currentStatus])
+  @@index([nextExecutionAt])
+}
+
+model CronjobExecution {
+  id                 String   @id @default(cuid())
+  cronjobId          String
+  cronjob            Cronjob  @relation(fields: [cronjobId], references: [id], onDelete: Cascade)
+  startedAt          DateTime
+  completedAt        DateTime
+  durationMs         Int
+  success            Boolean
+  statusCode         Int?
+  statusText         String?
+  requestHeaders     Json?
+  requestBody        String?
+  responseHeaders    Json?
+  responseBody       String?
+  responsePreview    String?
+  parsedResponseType String
+  errorMessage       String?
+  retryAttempt       Int      @default(0)
+  alertSent          Boolean  @default(false)
+  createdAt          DateTime @default(now())
+
+  @@index([cronjobId, startedAt])
+  @@index([success])
+  @@index([createdAt])
+}

@@ -1,4 +1,4 @@
-import type { AppConfig } from "../config/index.js";
+import type { HttpRequestConfig } from "../http/client.js";
 import type { AlertEmailService } from "../email/alerts.js";
 import {
   isHttpRequestFailure,
@@ -36,7 +36,11 @@ export class RandomCronWorker {
   private consecutiveFailures = 0;
 
   constructor(
-    private readonly config: AppConfig,
+    private readonly config: HttpRequestConfig & {
+      minIntervalMs: number;
+      maxIntervalMs: number;
+      maxRetries: number;
+    },
     private readonly logger: Logger,
     private readonly alerts?: AlertEmailService,
   ) {}

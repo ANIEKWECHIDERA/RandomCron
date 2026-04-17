@@ -12,19 +12,12 @@ export type HttpMethod =
   | "OPTIONS";
 
 export interface AppConfig {
-  targetUrl: string;
-  requestMethod: HttpMethod;
-  requestTimeoutMs: number;
-  minIntervalMs: number;
-  maxIntervalMs: number;
-  maxRetries: number;
-  allowNon2xx: boolean;
-  resendApiKey: string;
-  alertToEmail: string;
-  alertFromEmail: string;
-  authBearerToken?: string;
-  customHeaders: Record<string, string>;
-  requestBody?: string;
+  databaseUrl: string;
+  port: number;
+  clientOrigin: string;
+  resendApiKey?: string;
+  alertToEmail?: string;
+  alertFromEmail?: string;
   logLevel: string;
 }
 
@@ -54,71 +47,25 @@ export class ConfigError extends Error {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const errors: string[] = [];
 
-  const targetUrl = readRequiredString(env, "TARGET_URL", errors);
-  if (targetUrl) {
-    try {
-      new URL(targetUrl);
-    } catch {
-      errors.push("TARGET_URL must be a valid URL.");
-    }
-  }
-
-  const requestMethod = (env.REQUEST_METHOD || "GET").toUpperCase();
-  if (!SUPPORTED_METHODS.has(requestMethod as HttpMethod)) {
-    errors.push(`REQUEST_METHOD must be one of: ${Array.from(SUPPORTED_METHODS).join(", ")}.`);
-  }
-
-  const requestTimeoutMs = readPositiveInteger(
-    env,
-    "REQUEST_TIMEOUT_MS",
-    DEFAULT_REQUEST_TIMEOUT_MS,
-    errors,
-  );
-  const minIntervalMs = readPositiveInteger(env, "MIN_INTERVAL_MS", DEFAULT_MIN_INTERVAL_MS, errors);
-  const maxIntervalMs = readPositiveInteger(env, "MAX_INTERVAL_MS", DEFAULT_MAX_INTERVAL_MS, errors);
-  const maxRetries = readPositiveInteger(env, "MAX_RETRIES", DEFAULT_MAX_RETRIES, errors);
-
-  if (maxIntervalMs > FOURTEEN_MINUTES_MS) {
-    errors.push(`MAX_INTERVAL_MS must not exceed ${FOURTEEN_MINUTES_MS} ms.`);
-  }
-
-  if (minIntervalMs > maxIntervalMs) {
-    errors.push("MIN_INTERVAL_MS must not be greater than MAX_INTERVAL_MS.");
-  }
-
-  const customHeaders = readCustomHeaders(env.CUSTOM_HEADERS, errors);
-  const authBearerToken = emptyToUndefined(env.AUTH_BEARER_TOKEN);
-  if (authBearerToken && hasHeader(customHeaders, "authorization")) {
-    errors.push("Do not set both AUTH_BEARER_TOKEN and an Authorization custom header.");
-  }
-
-  const requestBody = emptyToUndefined(env.REQUEST_BODY);
-  if ((requestMethod === "GET" || requestMethod === "HEAD") && requestBody) {
-    errors.push("REQUEST_BODY cannot be used with GET or HEAD requests.");
-  }
-
-  const resendApiKey = readRequiredString(env, "RESEND_API_KEY", errors);
-  const alertToEmail = readRequiredString(env, "ALERT_TO_EMAIL", errors);
-  const alertFromEmail = readRequiredString(env, "ALERT_FROM_EMAIL", errors);
+  const databaseUrl = emptyToUndefined(env.DATABASE_URL) ?? "file:./dev.db";
+  const port = readPositiveInteger(env, "PORT", 3000, errors);
+  const clientOrigin = emptyToUndefined(env.CLIENT_ORIGIN) ?? "http://localhost:5173";
 
   if (errors.length > 0) {
     throw new ConfigError(errors);
   }
 
+  const resendApiKey = emptyToUndefined(env.RESEND_API_KEY);
+  const alertToEmail = emptyToUndefined(env.ALERT_TO_EMAIL);
+  const alertFromEmail = emptyToUndefined(env.ALERT_FROM_EMAIL);
+
   return {
-    targetUrl: targetUrl!,
-    requestMethod: requestMethod as HttpMethod,
-    requestTimeoutMs,
-    minIntervalMs,
-    maxIntervalMs,
-    maxRetries,
-    allowNon2xx: parseBoolean(env.ALLOW_NON_2XX, false),
-    resendApiKey: resendApiKey!,
-    alertToEmail: alertToEmail!,
-    alertFromEmail: alertFromEmail!,
-    ...(authBearerToken ? { authBearerToken } : {}),
-    customHeaders,
-    ...(requestBody ? { requestBody } : {}),
+    databaseUrl,
+    port,
+    clientOrigin,
+    ...(resendApiKey ? { resendApiKey } : {}),
+    ...(alertToEmail ? { alertToEmail } : {}),
+    ...(alertFromEmail ? { alertFromEmail } : {}),
     logLevel: env.LOG_LEVEL || DEFAULT_LOG_LEVEL,
   };
 }
